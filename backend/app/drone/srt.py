@@ -3,9 +3,15 @@
 Para que el dron los grabe hay que activar "Subtítulos de video" en DJI Fly (Ajustes → Cámara).
 Cada bloque del .SRT trae el tiempo del video y una línea con datos de vuelo. Formatos que entiende:
 
-    [latitude: 4.601234] [longitude: -74.065432] [rel_alt: 25.300 abs_alt: 2650.123]   (Avata 2, Mini, Air)
+    [latitude: 4.601234] [longitude: -74.065432] [rel_alt: 25.300 abs_alt: 2650.123]   (Mini, Air, Avata, Mavic 3)
     [latitude: 4.601234] [longtitude: -74.065432] ...                                (firmwares con el error de tipeo)
-    GPS(-74.065432,4.601234,25) BAROMETER:25.3                                       (drones más viejos: lon, lat)
+    GPS(-74.065432,4.601234,25) BAROMETER:25.3                                       (Phantom 4, Mavic Pro: lon, lat)
+    GPS(4.601234,-74.065432,25.0M) BAROMETER(25.3)                                   (Matrice 300 y otros: lat, lon)
+
+GPS(...) no dice qué número es la latitud, y DJI usa los dos órdenes. Se decide una vez por
+archivo: primero por geografía (una latitud no pasa de ±90 y nadie vuela al sur de -60, así que en
+Colombia, con longitudes entre -67 y -82, siempre queda claro), luego por las pistas del formato
+(altitud con unidad "M" o BAROMETER(...) → lat, lon) y, si no hay ninguna, como los Phantom (lon, lat).
 
 Los bloques sin GPS (0, 0 antes de que el dron tenga señal) se descartan.
 """
@@ -22,7 +28,9 @@ _LON = re.compile(rf"\blong[a-z]*itude\s*:\s*{_NUM}", re.IGNORECASE)
 _GPS = re.compile(rf"GPS\s*\(\s*{_NUM}\s*,\s*{_NUM}(?:\s*,\s*{_NUM})?", re.IGNORECASE)
 _REL_ALT = re.compile(rf"\brel_alt\s*:\s*{_NUM}", re.IGNORECASE)
 _ALT = re.compile(rf"\baltitude\s*:\s*{_NUM}", re.IGNORECASE)
-_BAROMETER = re.compile(rf"\bBAROMETER\s*:\s*{_NUM}", re.IGNORECASE)
+_BAROMETER = re.compile(rf"\bBAROMETER\s*[:(]\s*{_NUM}", re.IGNORECASE)
+_LAT_FIRST_HINT = re.compile(r"GPS\s*\([^)]*\d\s*M\s*\)|\bBAROMETER\s*\(", re.IGNORECASE)
+_SOUTHERNMOST_FLIGHT = -60.0  # más al sur solo está la Antártida
 
 
 @dataclass(frozen=True)
@@ -39,34 +47,59 @@ def read_srt(path: Path) -> list[SrtPoint]:
     return parse_srt(text)
 
 
+@dataclass(frozen=True)
+class _Block:
+    t: float
+    first: float  # latitud si `labeled`; si no, el primer número de GPS(...)
+    second: float
+    alt: float | None
+    labeled: bool  # el bloque dice cuál es la latitud y cuál la longitud
+    hints_lat_first: bool = False
+
+
 def parse_srt(text: str) -> list[SrtPoint]:
+    blocks = [b for raw in re.split(r"\r?\n\s*\r?\n", text) if (b := _parse_block(raw)) is not None]
+    lon_first = _gps_is_lon_first([b for b in blocks if not b.labeled])
+
     points = []
-    for block in re.split(r"\r?\n\s*\r?\n", text):
-        point = _parse_block(block)
-        if point is not None:
-            points.append(point)
+    for b in blocks:
+        lat, lon = (b.second, b.first) if (lon_first and not b.labeled) else (b.first, b.second)
+        if (lat == 0 and lon == 0) or not (-90 <= lat <= 90 and -180 <= lon <= 180):
+            continue
+        points.append(SrtPoint(t=b.t, lat=lat, lon=lon, alt=b.alt))
     points.sort(key=lambda p: p.t)
     return points
 
 
-def _parse_block(block: str) -> SrtPoint | None:
+def _parse_block(block: str) -> _Block | None:
     time = _TIME.search(block)
     if not time:
         return None
     h, m, s, ms = time.groups()
-    t = int(h) * 3600 + int(m) * 60 + int(s) + int(ms.ljust(3, "0")) / 1000
+    t = round(int(h) * 3600 + int(m) * 60 + int(s) + int(ms.ljust(3, "0")) / 1000, 3)
 
     lat_match, lon_match = _LAT.search(block), _LON.search(block)
     if lat_match and lon_match:
-        lat, lon = float(lat_match.group(1)), float(lon_match.group(1))
-    elif gps := _GPS.search(block):
-        lon, lat = float(gps.group(1)), float(gps.group(2))  # el formato viejo va (longitud, latitud)
-    else:
-        return None
+        return _Block(t, float(lat_match.group(1)), float(lon_match.group(1)), _altitude(block), labeled=True)
+    if gps := _GPS.search(block):
+        hint = bool(_LAT_FIRST_HINT.search(block))
+        return _Block(t, float(gps.group(1)), float(gps.group(2)), _altitude(block), labeled=False, hints_lat_first=hint)
+    return None
 
-    if (lat == 0 and lon == 0) or not (-90 <= lat <= 90 and -180 <= lon <= 180):
-        return None
-    return SrtPoint(t=round(t, 3), lat=lat, lon=lon, alt=_altitude(block))
+
+def _gps_is_lon_first(blocks: list[_Block]) -> bool:
+    """Decide el orden de GPS(a, b) para todo el archivo."""
+    with_signal = [b for b in blocks if not (b.first == 0 and b.second == 0)]
+    for b in with_signal:
+        if not _can_be_latitude(b.first):
+            return True
+        if not _can_be_latitude(b.second):
+            return False
+    return not any(b.hints_lat_first for b in with_signal)
+
+
+def _can_be_latitude(value: float) -> bool:
+    return _SOUTHERNMOST_FLIGHT <= value <= 90
 
 
 def _altitude(block: str) -> float | None:

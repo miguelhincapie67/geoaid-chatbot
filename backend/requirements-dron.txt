@@ -1,3 +1,5 @@
 -r requirements.txt
 # Solo para el módulo del dron (python -m app.drone): ffmpeg para sacar cuadros del video.
 imageio-ffmpeg>=0.5,<1
+# Recuadros que siguen a cada edificación en el video (python -m app.drone.boxes --video).
+opencv-python>=4.9,<5

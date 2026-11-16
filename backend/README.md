@@ -274,6 +274,22 @@ El `.SRT` se busca solo junto al video, con el mismo nombre. Se pueden pasar `--
 - **Privacidad:** los cuadros pueden mostrar personas y placas. No se publican y se borran después de la demo.
 - **Vuelos:** con el dron registrado ante la Aerocivil y respetando las distancias del RAC 100.
 
+### Recuadros por edificación en el video
+
+Devuelve el mismo video del dron con un recuadro de color sobre cada edificación, como se vería en vivo. Claude mira un cuadro clave al empezar cada escena y después uno cada 3 segundos, y marca cada edificación con su nivel y una etiqueta corta ("colapso total", "techo hundido"). Entre un cuadro clave y otro, OpenCV sigue el movimiento de la cámara y los recuadros se mueven con la imagen.
+
+```powershell
+# Probar con una foto (≈ USD 0,02): deja foto_cajas.jpg al lado
+.\.venv\Scripts\python -m app.drone.boxes C:\ruta\foto.jpg
+
+# Video completo: deja data/vuelos/<nombre>/video_cajas.mp4
+.\.venv\Scripts\python -m app.drone.boxes --video C:\ruta\DJI_0001.MP4 --cada 3 --max-cuadros 30
+```
+
+- **Costo:** cerca de 2 centavos de dólar por cuadro clave, con un tope de 30 por video (`--max-cuadros`). Los recuadros quedan en `cajas.json`: volver a dibujar el mismo video es gratis (`--de-nuevo` le pregunta otra vez a Claude).
+- **No es en vivo:** el video se procesa después del vuelo. En la expo se proyecta el resultado, que no depende del internet del lugar.
+- **Es aproximado:** los recuadros y los niveles son una estimación para priorizar, igual que el semáforo.
+
 ## Pruebas y migraciones
 
 ```bash

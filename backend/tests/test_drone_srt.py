@@ -36,6 +36,46 @@ def test_formato_viejo_gps_lon_lat():
     assert parse_srt(block) == [SrtPoint(t=65.0, lat=4.601234, lon=-74.065432, alt=25.3)]
 
 
+def test_formato_gps_lat_lon_en_colombia():
+    block = "1\n00:00:01,000 --> 00:00:01,033\nGPS(4.601234,-74.065432,19) BAROMETER:25.3\n"
+    assert parse_srt(block) == [SrtPoint(t=1.0, lat=4.601234, lon=-74.065432, alt=25.3)]
+
+
+def test_formato_gps_lat_lon_con_barometro_entre_parentesis():
+    block = (
+        "1\n00:00:00,000 --> 00:00:00,033\n"
+        "GPS(39.906217,116.391305,69.800) BAROMETER(91.2) HOME(39.906206,116.391400)\n"
+    )
+    assert parse_srt(block) == [SrtPoint(t=0.0, lat=39.906217, lon=116.391305, alt=91.2)]
+
+
+def test_formato_phantom_lon_lat_fuera_de_colombia():
+    block = "1\n00:00:01,000 --> 00:00:01,033\nHOME(149.0251,-20.2532) 2017.08.05 14:11:51\nGPS(149.0251,-20.2533,16) BAROMETER:1.9\n"
+    assert parse_srt(block) == [SrtPoint(t=1.0, lat=-20.2533, lon=149.0251, alt=1.9)]
+
+
+@pytest.mark.parametrize(
+    ("line", "lat", "lon"),
+    [
+        ("GPS(36.6146,-6.1120,0.0M) BAROMETER:0.3M", 36.6146, -6.112),  # Matrice 300: la "M" delata lat, lon
+        ("F/5.6, SS 400, ISO 100, EV 0, GPS (-58.851745, -34.237922, 15), HOME (-58.84, -34.23, -57.98m)",
+         -34.237922, -58.851745),  # Phantom 4 RTK: lon, lat
+    ],
+)
+def test_orden_ambiguo_usa_las_pistas_del_formato(line, lat, lon):
+    point = parse_srt(f"1\n00:00:02,000 --> 00:00:02,033\n{line}\n")[0]
+    assert (point.lat, point.lon) == (lat, lon)
+
+
+def test_el_orden_se_decide_para_todo_el_archivo():
+    text = (
+        "1\n00:00:00,000 --> 00:00:00,033\nGPS(0.0,0.0,0)\n\n"
+        "2\n00:00:01,000 --> 00:00:01,033\nGPS(10.5,-20.25,30)\n\n"  # solo, sería ambiguo
+        "3\n00:00:02,000 --> 00:00:02,033\nGPS(10.6,-120.5,30)\n"  # -120 no es latitud: va lat, lon
+    )
+    assert [(p.lat, p.lon) for p in parse_srt(text)] == [(10.5, -20.25), (10.6, -120.5)]
+
+
 def test_descarta_bloques_sin_senal_o_sin_gps():
     text = (
         "1\n00:00:00,000 --> 00:00:00,033\n[latitude: 0.000000] [longitude: 0.000000] [rel_alt: 0.000]\n\n"
