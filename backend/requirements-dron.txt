@@ -1,0 +1,3 @@
+-r requirements.txt
+# Solo para el módulo del dron (python -m app.drone): ffmpeg para sacar cuadros del video.
+imageio-ffmpeg>=0.5,<1

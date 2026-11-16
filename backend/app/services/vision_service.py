@@ -18,6 +18,8 @@ Cuándo devuelve `level=None`:
 
 Solo se envían las fotos del daño. La cédula y la selfie nunca pasan por aquí.
 
+Con `source="dron"` clasifica un cuadro de video del dron (app/drone) con indicaciones para la vista aérea.
+
 Probar con fotos sueltas, sin WhatsApp (desde la carpeta backend/):
     .venv\\Scripts\\python -m app.services.vision_service foto1.jpg foto2.jpg
 """
@@ -29,6 +31,7 @@ import logging
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 import anthropic
 from PIL import Image, ImageOps, UnidentifiedImageError
@@ -94,6 +97,21 @@ Reglas:
 - Responde solo con el JSON pedido. Los hallazgos van en español, en frases cortas.
 """
 
+_INTRO_DRON = """\
+Recibes un cuadro de un video grabado por un dron sobre una zona afectada (vista aérea, cenital u oblicua).
+Puede haber varias edificaciones: evalúa la más dañada que se vea con claridad. Desde el aire, además:
+- Techos hundidos, perforados o desplazados, pisos aplastados o escombros alrededor de la edificación indican ROJO.
+- Tejas caídas o huecos pequeños en el techo, sin deformación, indican AMARILLO.
+- El interior no se ve: VERDE significa solo "sin daño visible desde el aire".
+- Si no hay edificaciones con suficiente detalle (cielo, árboles, vías, muy lejos o borroso), es SIN_CLASIFICAR.
+"""
+_INTRO_WHATSAPP = "Recibes de 1 a 3 fotos que un ciudadano envió por WhatsApp de su vivienda o de su negocio.\n"
+# Mismos criterios y reglas; solo cambia la presentación de la imagen.
+DRONE_SYSTEM_PROMPT = SYSTEM_PROMPT.replace(_INTRO_WHATSAPP, _INTRO_DRON)
+assert DRONE_SYSTEM_PROMPT != SYSTEM_PROMPT
+
+Source = Literal["whatsapp", "dron"]
+
 # Salida estructurada: la API garantiza que la respuesta es un JSON con esta forma.
 _SCHEMA = {
     "type": "object",
@@ -115,7 +133,7 @@ _SCHEMA = {
 }
 
 
-def analyze_building_damage(image_paths: list[Path]) -> DamageAssessment:
+def analyze_building_damage(image_paths: list[Path], source: Source = "whatsapp") -> DamageAssessment:
     settings = get_settings()
     if not settings.ANTHROPIC_API_KEY:
         logger.warning("VISIÓN SIN CONFIGURAR (falta ANTHROPIC_API_KEY): %s foto(s) sin clasificar", len(image_paths))
@@ -130,10 +148,10 @@ def analyze_building_damage(image_paths: list[Path]) -> DamageAssessment:
         response = _client(settings.ANTHROPIC_API_KEY).messages.create(
             model=settings.VISION_MODEL,
             max_tokens=MAX_TOKENS,
-            system=SYSTEM_PROMPT,
+            system=DRONE_SYSTEM_PROMPT if source == "dron" else SYSTEM_PROMPT,
             # Esfuerzo bajo: la clasificación no necesita pensar mucho y así responde más rápido y gasta menos.
             output_config={"effort": "low", "format": {"type": "json_schema", "schema": _SCHEMA}},
-            messages=[{"role": "user", "content": [*images, {"type": "text", "text": _user_text(len(images))}]}],
+            messages=[{"role": "user", "content": [*images, {"type": "text", "text": _user_text(len(images), source)}]}],
         )
     except anthropic.APIError as error:
         logger.error("La API de visión falló; queda sin clasificar. %s: %s", type(error).__name__, error)
@@ -194,7 +212,9 @@ def _prepare_image(path: Path) -> dict | None:
     return {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": data}}
 
 
-def _user_text(count: int) -> str:
+def _user_text(count: int, source: Source = "whatsapp") -> str:
+    if source == "dron":
+        return "Evalúa el daño de las edificaciones en este cuadro del dron."
     fotos = "la foto" if count == 1 else f"las {count} fotos"
     return f"Evalúa el daño de la edificación en {fotos}."
 

@@ -155,3 +155,16 @@ def test_achica_las_fotos_grandes_y_envia_maximo_tres(api, photo):
         assert block["source"]["media_type"] == "image/jpeg"
         sent = Image.open(io.BytesIO(base64.b64decode(block["source"]["data"])))
         assert max(sent.size) <= vs.MAX_LONG_EDGE
+
+
+def test_modo_dron_usa_indicaciones_de_vista_aerea(api, photo):
+    vs.analyze_building_damage([photo()], source="dron")
+    call = api.calls[0]
+    assert call["system"] == vs.DRONE_SYSTEM_PROMPT
+    assert "dron" in call["system"] and "WhatsApp" not in call["system"]
+    assert "cuadro del dron" in call["messages"][0]["content"][-1]["text"]
+
+
+def test_por_defecto_sigue_siendo_whatsapp(api, photo):
+    vs.analyze_building_damage([photo()])
+    assert api.calls[0]["system"] == vs.SYSTEM_PROMPT

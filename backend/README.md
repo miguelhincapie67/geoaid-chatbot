@@ -217,7 +217,9 @@ const res = await fetch(`${BOT_URL}/api/v1/reports/public`, {
 | `app/services/ocr_service.py` | OCR de cédula. **Simulado**: lo reemplaza el equipo de OCR |
 | `app/services/vision_service.py` | Semáforo de daño con Claude (ver "Semáforo de daño") |
 | `app/services/alerts.py` | Reglas de alertas para el revisor |
+| `app/drone/` | Módulo del dron: cuadros del video + GPS del `.SRT` → semáforo → mapa (ver "Módulo del dron") |
 | `data/media/` | Fotos guardadas. **Privada**: no se publica y no se sube a git |
+| `data/vuelos/` | Resultados del módulo del dron. **Privada**: no se sube a git |
 
 **Integrar el OCR real:** reemplaza el cuerpo de `extract_id_data` manteniendo su firma; el contrato está documentado en el archivo. El bot ejecuta como máximo 2 análisis a la vez y le avisa al ciudadano mientras espera.
 
@@ -239,6 +241,38 @@ Para probar con fotos sueltas, sin WhatsApp:
 ```powershell
 .\.venv\Scripts\python -m app.services.vision_service foto1.jpg foto2.jpg
 ```
+
+## Módulo del dron (MVP)
+
+Toma un video del dron, saca un cuadro cada pocos segundos, le pone el GPS del archivo `.SRT` y pasa cada cuadro por el mismo semáforo de las fotos de WhatsApp (en modo "vista aérea"). Al final abre un mapa con la ruta del vuelo y un punto de color por cuadro. Al darle clic a un punto se ve el cuadro y lo que vio el modelo. El mapa es un solo archivo HTML: funciona sin internet, salvo el fondo del mapa.
+
+**Instalar** (una vez, trae ffmpeg):
+
+```powershell
+.\.venv\Scripts\python -m pip install -r requirements-dron.txt
+```
+
+**Antes de volar (DJI Fly):** activar *Ajustes → Cámara → Subtítulos de video*, para que el dron grabe el `.SRT` con el GPS junto a cada video. Si algún video no abre, grabar en H.264.
+
+**Usar** (desde `backend`):
+
+```powershell
+# Gratis: solo saca los cuadros y arma el mapa, sin clasificar
+.\.venv\Scripts\python -m app.drone --video C:\ruta\DJI_0001.MP4 --sin-clasificar
+
+# Con el semáforo (pregunta antes de gastar)
+.\.venv\Scripts\python -m app.drone --video C:\ruta\DJI_0001.MP4 --cada 5 --max-cuadros 40
+
+# Imágenes públicas de un sismo real, con su crédito (si traen GPS en el EXIF, salen en el mapa)
+.\.venv\Scripts\python -m app.drone --imagenes C:\ruta\fotos --credito "UAVs-TEBDE, Turquía 2023 (CC BY 4.0)"
+```
+
+El `.SRT` se busca solo junto al video, con el mismo nombre. Se pueden pasar `--video` e `--imagenes` en la misma corrida. El resultado queda en `data/vuelos/<nombre>/`: `mapa.html`, `resultados.geojson` y `cuadros/`.
+
+- **Costo:** cerca de 1 centavo de dólar por cuadro con Sonnet 5.5. Por eso hay un tope de 40 cuadros por video (`--max-cuadros`).
+- **Lo que dice el mapa es preliminar.** Verde significa "sin daño visible desde el aire", nunca "habitable": el interior no se ve desde arriba.
+- **Privacidad:** los cuadros pueden mostrar personas y placas. No se publican y se borran después de la demo.
+- **Vuelos:** con el dron registrado ante la Aerocivil y respetando las distancias del RAC 100.
 
 ## Pruebas y migraciones
 
